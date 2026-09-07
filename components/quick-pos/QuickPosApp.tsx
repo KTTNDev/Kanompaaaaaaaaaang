@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BarChart3, Banknote, Check, ChevronDown, ChevronRight, CirclePlus, Cloud, CreditCard, Minus, Pencil, Plus, QrCode, RefreshCw, Settings, ShoppingBag, Store, Trash2, Wallet } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, BarChart3, Banknote, Check, ChevronDown, ChevronRight, CirclePlus, Clock3, Cloud, CreditCard, Lightbulb, Minus, Pencil, Plus, QrCode, ReceiptText, RefreshCw, Settings, ShoppingBag, Store, Trash2, TrendingUp, Trophy, Wallet } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -175,7 +175,7 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
       {cart.length > 0 && <div className="fixed inset-x-3 bottom-24 z-30 rounded-[24px] bg-white p-3 shadow-2xl lg:hidden"><div className="flex items-center justify-between"><div><p className="text-xs text-slate-400">{itemCount} ชิ้น</p><p className="text-2xl font-black">{money(total)}</p></div><div className="flex gap-2"><Button onClick={() => void completeOrder("CASH", total)} disabled={saving} className="h-14 rounded-2xl bg-[#1697a8] px-5 font-black">เงินสดพอดี</Button><Button onClick={() => setPaymentOpen(true)} variant="outline" className="h-14 rounded-2xl px-4">อื่น ๆ</Button></div></div></div>}
     </main>}
 
-    {view === "reports" && <ReportsView data={data} days={rangeDays} setDays={setRangeDays} />}
+    {view === "reports" && <AdvancedReportsView data={data} days={rangeDays} setDays={setRangeDays} />}
     {view === "settings" && <EasySettingsView data={data} connected={connected} pendingSyncCount={pendingSyncCount} syncing={syncing} appPricingEnabled={appPricingEnabled} onAppPricingChange={changeAppPricingSetting} onRefresh={() => void load()} onSync={() => void syncPendingOrders()} onAdd={() => { setProductDraft(emptyProduct()); setProductOpen(true); }} onEdit={(product) => { setProductDraft(product); setProductOpen(true); }} onArchive={(product) => void archiveProduct(product)} />}
 
     <nav className="fixed inset-x-0 bottom-0 z-40 grid h-20 grid-cols-3 border-t bg-white pb-[env(safe-area-inset-bottom)] lg:hidden"><NavButton active={view === "reports"} icon={BarChart3} label="รายงาน" onClick={() => setView("reports")} /><NavButton active={view === "sale"} icon={Store} label="ขายของ" onClick={() => setView("sale")} /><NavButton active={view === "settings"} icon={Settings} label="ตั้งค่า" onClick={() => setView("settings")} /></nav>
@@ -203,6 +203,101 @@ function Metric({ dot, label, value, note }: { dot: string; label: string; value
 function ReportRow({ icon: Icon, title, description, value }: { icon: typeof Banknote; title: string; description: string; value: number }) { return <div className="flex items-center gap-4 border-b p-6 last:border-0"><Icon className="size-6 text-slate-400" /><div className="flex-1"><p className="font-black">{title}</p><p className="text-sm text-slate-400">{description}</p></div><b className="text-xl">{money(value)}</b><ChevronRight className="size-5 text-slate-300" /></div>; }
 
 function SettingsView({ data, connected, scriptUrl, setScriptUrl, onConnect, onAdd, onEdit, onArchive }: { data: QuickBootstrap; connected: boolean; scriptUrl: string; setScriptUrl: (value: string) => void; onConnect: () => void; onAdd: () => void; onEdit: (product: QuickProduct) => void; onArchive: (product: QuickProduct) => void }) { return <main className="mx-auto max-w-5xl p-5 pb-32 lg:p-8"><div><p className="text-sm text-slate-400">ตั้งค่าร้าน</p><h1 className="text-3xl font-black">สินค้าและ Google Sheet</h1></div><section className="mt-6 rounded-[30px] bg-[#153f46] p-6 text-white"><div className="flex items-center gap-3"><Cloud className="size-7 text-[#55d5df]" /><div><p className="font-black">ฐานข้อมูล Google Sheet</p><p className="text-sm text-white/60">{connected ? "เชื่อมต่อและอ่านข้อมูลสดแล้ว" : "วาง Web App URL เพียงครั้งเดียว"}</p></div></div><div className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={scriptUrl} onChange={(e) => setScriptUrl(e.target.value)} placeholder="https://script.google.com/macros/s/.../exec" className="h-14 flex-1 rounded-2xl border border-white/20 bg-white/10 px-4 text-sm outline-none placeholder:text-white/30" /><Button onClick={onConnect} className="h-14 rounded-2xl bg-[#1697a8] px-6 font-black">เชื่อมต่อ</Button></div><p className="mt-3 text-xs leading-5 text-white/45">ใช้ไฟล์ google-apps-script/Code.gs ในโปรเจกต์เพื่อติดตั้ง Web App เข้ากับชีตฐานข้อมูล</p></section><section className="mt-7"><div className="flex items-center justify-between"><div><h2 className="text-xl font-black">รายการสินค้า</h2><p className="text-sm text-slate-400">แต่ละเมนูมีราคาจบในตัว จิ้มแล้วคิดเงินได้เลย</p></div><Button onClick={onAdd} className="h-12 rounded-full bg-[#1697a8] px-5 font-black"><CirclePlus className="size-5" />เพิ่มสินค้า</Button></div><div className="mt-4 grid gap-3 sm:grid-cols-2">{data.products.filter((product) => product.active).map((product) => <article key={product.id} className="flex items-center gap-4 rounded-[24px] bg-white p-4 shadow-sm"><div className="grid size-16 shrink-0 place-items-center rounded-2xl bg-[#e2f4f5] text-3xl">🍞</div><div className="min-w-0 flex-1"><p className="truncate font-black">{product.name}</p><p className="text-sm text-slate-400">ขาย {money(product.price)} · ทุน {money(product.cost)}</p></div><button onClick={() => onEdit(product)} className="grid size-11 place-items-center rounded-xl bg-slate-100"><Pencil className="size-4" /></button><button onClick={() => onArchive(product)} className="grid size-11 place-items-center rounded-xl bg-rose-50 text-rose-500"><Trash2 className="size-4" /></button></article>)}</div></section></main>; }
+function AdvancedReportsView({ data, days, setDays }: { data: QuickBootstrap; days: number; setDays: (value: number) => void }) {
+  const periodStart = new Date();
+  periodStart.setHours(0, 0, 0, 0);
+  periodStart.setDate(periodStart.getDate() - (days - 1));
+  const previousStart = new Date(periodStart);
+  previousStart.setDate(previousStart.getDate() - days);
+  const completed = data.orders.filter((order) => order.status === "COMPLETED");
+  const orders = completed.filter((order) => new Date(order.createdAt) >= periodStart);
+  const previousOrders = completed.filter((order) => { const date = new Date(order.createdAt); return date >= previousStart && date < periodStart; });
+  const expenses = data.expenses.filter((item) => new Date(item.createdAt) >= periodStart).reduce((sum, item) => sum + item.amount, 0);
+  const waste = data.waste.filter((item) => new Date(item.createdAt) >= periodStart).reduce((sum, item) => sum + item.totalCost, 0);
+  const revenue = orders.reduce((sum, order) => sum + order.total, 0);
+  const previousRevenue = previousOrders.reduce((sum, order) => sum + order.total, 0);
+  const cost = orders.reduce((sum, order) => sum + order.cost, 0);
+  const grossProfit = orders.reduce((sum, order) => sum + order.profit, 0);
+  const netProfit = grossProfit - expenses - waste;
+  const itemCount = orders.reduce((sum, order) => sum + order.itemCount, 0);
+  const averageTicket = orders.length ? revenue / orders.length : 0;
+  const grossMargin = revenue ? grossProfit / revenue * 100 : 0;
+  const netMargin = revenue ? netProfit / revenue * 100 : 0;
+  const growth = previousRevenue ? (revenue - previousRevenue) / previousRevenue * 100 : revenue ? 100 : 0;
+
+  const productMap = new Map<string, { id: string; name: string; quantity: number; revenue: number; profit: number }>();
+  orders.forEach((order) => order.items.forEach((item) => {
+    const key = item.productId || item.productName;
+    const current = productMap.get(key) || { id: key, name: item.productName, quantity: 0, revenue: 0, profit: 0 };
+    current.quantity += item.quantity;
+    current.revenue += item.lineTotal;
+    current.profit += item.lineTotal - item.lineCost;
+    productMap.set(key, current);
+  }));
+  const topProducts = [...productMap.values()].sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue).slice(0, 5);
+  const maxProductQuantity = Math.max(1, ...topProducts.map((product) => product.quantity));
+
+  const hourMap = new Map<number, number>();
+  orders.forEach((order) => { const hour = new Date(order.createdAt).getHours(); hourMap.set(hour, (hourMap.get(hour) || 0) + order.total); });
+  const peakHour = [...hourMap.entries()].sort((a, b) => b[1] - a[1])[0];
+  const cash = orders.filter((order) => order.paymentMethod === "CASH").reduce((sum, order) => sum + order.total, 0);
+  const digital = revenue - cash;
+  const storeSales = orders.filter((order) => order.channel === "STORE").reduce((sum, order) => sum + order.total, 0);
+  const appSales = revenue - storeSales;
+
+  const chartDayCount = Math.min(days, 14);
+  const dailySales = Array.from({ length: chartDayCount }, (_, index) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (chartDayCount - index - 1));
+    const total = orders.filter((order) => new Date(order.createdAt).toDateString() === date.toDateString()).reduce((sum, order) => sum + order.total, 0);
+    return { key: date.toISOString(), label: date.toLocaleDateString("th-TH", { day: "numeric", month: "short" }), total };
+  });
+  const maxDailySales = Math.max(1, ...dailySales.map((day) => day.total));
+
+  const recommendations: Array<{ title: string; detail: string; tone: "good" | "warn" | "idea" }> = [];
+  if (!orders.length) {
+    recommendations.push({ title: "เริ่มเก็บข้อมูลการขาย", detail: "ยังไม่มีบิลในช่วงนี้ ลองจัดชุดเมนูขายง่ายและบันทึกทุกบิลเพื่อให้ระบบวิเคราะห์ได้แม่นขึ้น", tone: "idea" });
+  } else {
+    if (growth < -10) recommendations.push({ title: "ยอดขายลดจากช่วงก่อน", detail: `ยอดขายลดลง ${Math.abs(growth).toFixed(0)}% ควรลองโปรโมชันช่วงเงียบหรือชวนลูกค้าเดิมกลับมาซื้อ`, tone: "warn" });
+    else if (growth > 10) recommendations.push({ title: "ยอดขายกำลังเติบโต", detail: `ยอดขายเพิ่มขึ้น ${growth.toFixed(0)}% รักษาสต็อกเมนูขายดีและจังหวะการผลิตช่วงพีกไว้`, tone: "good" });
+    if (averageTicket < 60) recommendations.push({ title: "เพิ่มยอดต่อบิลด้วยชุดสินค้า", detail: `บิลเฉลี่ย ${money(averageTicket)} ลองทำชุด 2–3 ชิ้นหรือเพิ่มเมนูเสริมราคาเล็กน้อยที่กดขายได้ในครั้งเดียว`, tone: "idea" });
+    if (grossMargin < 45) recommendations.push({ title: "ตรวจราคาขายและต้นทุน", detail: `อัตรากำไรขั้นต้น ${grossMargin.toFixed(1)}% ควรทบทวนต้นทุนวัตถุดิบ ปริมาณต่อชิ้น หรือปรับราคาเมนูที่กำไรต่ำ`, tone: "warn" });
+    if (waste > revenue * 0.03) recommendations.push({ title: "ลดสินค้าทิ้ง", detail: `ของเสียคิดเป็น ${revenue ? (waste / revenue * 100).toFixed(1) : "0"}% ของยอดขาย ควรลดการผลิตล่วงหน้าและผลิตเพิ่มใกล้ช่วงเวลาขายดี`, tone: "warn" });
+    if (topProducts[0]) recommendations.push({ title: `ดันเมนู ${topProducts[0].name}`, detail: `ขายดีที่สุด ${topProducts[0].quantity} ชิ้น ใช้เป็นเมนูเด่นหน้าร้านและจับคู่กับสินค้าที่ขายน้อยเพื่อเพิ่มยอดต่อบิล`, tone: "good" });
+    if (peakHour) recommendations.push({ title: `เตรียมของก่อน ${String(peakHour[0]).padStart(2, "0")}:00 น.`, detail: `ช่วงนี้ทำยอดสูงสุด ${money(peakHour[1])} ควรเตรียมสินค้า เงินทอน และวัตถุดิบให้พร้อมก่อนช่วงพีก`, tone: "idea" });
+  }
+
+  const toneClass = { good: "bg-emerald-50 text-emerald-800", warn: "bg-amber-50 text-amber-900", idea: "bg-cyan-50 text-cyan-900" };
+  return <main className="mx-auto max-w-6xl p-4 pb-40 sm:p-6 sm:pb-40 lg:p-8 lg:pb-40">
+    <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm font-bold text-slate-400">วิเคราะห์จากยอดขายจริง</p><h1 className="text-3xl font-black">รายงานและคำแนะนำ</h1></div><span className="rounded-full bg-white px-4 py-2 text-sm font-bold shadow-sm">{new Date().toLocaleDateString("th-TH", { dateStyle: "medium" })}</span></div>
+    <div className="mt-5 grid grid-cols-3 rounded-2xl bg-white p-1.5 shadow-sm">{[{ value: 1, label: "วันนี้" }, { value: 7, label: "7 วัน" }, { value: 30, label: "30 วัน" }].map((item) => <button key={item.value} onClick={() => setDays(item.value)} className={`min-h-12 rounded-xl font-black ${days === item.value ? "bg-[#1697a8] text-white" : "text-slate-500"}`}>{item.label}</button>)}</div>
+
+    <section className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <ReportKpi icon={Banknote} label="ยอดขาย" value={money(revenue)} note={`${orders.length} บิล`} />
+      <ReportKpi icon={TrendingUp} label="กำไรสุทธิ" value={money(netProfit)} note={`${netMargin.toFixed(1)}% ของยอดขาย`} positive={netProfit >= 0} />
+      <ReportKpi icon={ReceiptText} label="บิลเฉลี่ย" value={money(averageTicket)} note={`${itemCount} ชิ้นทั้งหมด`} />
+      <ReportKpi icon={growth >= 0 ? ArrowUpRight : ArrowDownRight} label="เทียบช่วงก่อน" value={`${growth >= 0 ? "+" : ""}${growth.toFixed(0)}%`} note={`ช่วงก่อน ${money(previousRevenue)}`} positive={growth >= 0} />
+    </section>
+
+    <section className="mt-5 grid gap-5 lg:grid-cols-[1.35fr_.65fr]">
+      <div className="rounded-[28px] bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="text-xl font-black">แนวโน้มยอดขาย</h2><p className="text-sm text-slate-400">{days > 14 ? "แสดง 14 วันล่าสุด" : `แสดง ${days} วันล่าสุด`}</p></div><b className="text-2xl">{money(revenue)}</b></div><div className="mt-6 flex h-44 items-end gap-2 border-b border-slate-100 px-1">{dailySales.map((day) => <div key={day.key} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-2"><span className="hidden text-[10px] font-bold text-slate-400 sm:block">{day.total ? money(day.total) : ""}</span><div title={`${day.label}: ${money(day.total)}`} className="w-full min-w-3 rounded-t-lg bg-gradient-to-t from-[#168f9f] to-[#55d5df]" style={{ height: `${Math.max(day.total ? 8 : 3, day.total / maxDailySales * 100)}%` }} /><span className="truncate text-[10px] text-slate-400">{day.label}</span></div>)}</div></div>
+      <div className="rounded-[28px] bg-[#153f46] p-5 text-white"><h2 className="text-xl font-black">กำไรและต้นทุน</h2><div className="mt-5 space-y-4"><ReportAmount label="ต้นทุนสินค้า" value={cost} /><ReportAmount label="กำไรขั้นต้น" value={grossProfit} accent /><ReportAmount label="ค่าใช้จ่าย" value={expenses} /><ReportAmount label="สินค้าทิ้ง" value={waste} /><div className="border-t border-white/15 pt-4"><ReportAmount label="กำไรสุทธิ" value={netProfit} accent /></div></div><p className="mt-5 rounded-xl bg-white/10 p-3 text-xs">อัตรากำไรขั้นต้น {grossMargin.toFixed(1)}% · สุทธิ {netMargin.toFixed(1)}%</p></div>
+    </section>
+
+    <section className="mt-5 grid gap-5 lg:grid-cols-2">
+      <div className="rounded-[28px] bg-white p-5 shadow-sm"><div className="flex items-center gap-3"><Trophy className="size-6 text-amber-500" /><div><h2 className="text-xl font-black">สินค้าขายดี</h2><p className="text-sm text-slate-400">เรียงตามจำนวนชิ้น</p></div></div><div className="mt-5 space-y-4">{topProducts.map((product, index) => <div key={product.id}><div className="flex items-center justify-between gap-3"><span className="truncate font-bold"><b className="mr-2 text-[#1697a8]">#{index + 1}</b>{product.name}</span><span className="shrink-0 text-sm"><b>{product.quantity}</b> ชิ้น · {money(product.revenue)}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#1697a8]" style={{ width: `${product.quantity / maxProductQuantity * 100}%` }} /></div></div>)}{!topProducts.length && <p className="py-10 text-center font-bold text-slate-400">ยังไม่มีข้อมูลสินค้าในช่วงนี้</p>}</div></div>
+      <div className="grid gap-4 sm:grid-cols-2"><ReportSplit title="ช่องทางการขาย" icon={Store} rows={[{ label: "หน้าร้าน", value: storeSales }, { label: "แอป", value: appSales }]} total={revenue} /><ReportSplit title="การรับเงิน" icon={Wallet} rows={[{ label: "เงินสด", value: cash }, { label: "โอน/บัตร", value: digital }]} total={revenue} /><div className="rounded-[24px] bg-white p-5 shadow-sm sm:col-span-2"><div className="flex items-center gap-3"><Clock3 className="size-6 text-[#1697a8]" /><div><p className="font-black">ช่วงเวลาขายดีที่สุด</p><p className="text-sm text-slate-400">{peakHour ? `${String(peakHour[0]).padStart(2, "0")}:00–${String((peakHour[0] + 1) % 24).padStart(2, "0")}:00 น. · ${money(peakHour[1])}` : "ยังไม่มีข้อมูลเพียงพอ"}</p></div></div></div></div>
+    </section>
+
+    <section className="mt-5 rounded-[28px] bg-white p-5 shadow-sm"><div className="flex items-center gap-3"><div className="grid size-12 place-items-center rounded-2xl bg-amber-100 text-amber-700"><Lightbulb className="size-6" /></div><div><h2 className="text-xl font-black">คำแนะนำพัฒนาร้าน</h2><p className="text-sm text-slate-400">สร้างอัตโนมัติจากยอดขาย ต้นทุน และพฤติกรรมการซื้อในช่วงที่เลือก</p></div></div><div className="mt-5 grid gap-3 md:grid-cols-2">{recommendations.slice(0, 6).map((recommendation, index) => <article key={`${recommendation.title}-${index}`} className={`rounded-2xl p-4 ${toneClass[recommendation.tone]}`}><h3 className="font-black">{recommendation.title}</h3><p className="mt-1 text-sm leading-6 opacity-80">{recommendation.detail}</p></article>)}</div><p className="mt-4 text-xs text-slate-400">คำแนะนำเป็นแนวทางจากข้อมูลที่บันทึก ควรพิจารณาสภาพอากาศ เทศกาล และเหตุการณ์หน้าร้านร่วมด้วย</p></section>
+  </main>;
+}
+
+function ReportKpi({ icon: Icon, label, value, note, positive }: { icon: typeof Banknote; label: string; value: string; note: string; positive?: boolean }) { return <article className="rounded-[24px] bg-white p-4 shadow-sm"><div className="flex items-center gap-2 text-sm font-bold text-slate-400"><Icon className={`size-5 ${positive === false ? "text-rose-500" : "text-[#1697a8]"}`} />{label}</div><p className={`mt-3 text-2xl font-black sm:text-3xl ${positive === false ? "text-rose-600" : ""}`}>{value}</p><p className="mt-1 text-xs text-slate-400">{note}</p></article>; }
+function ReportAmount({ label, value, accent }: { label: string; value: number; accent?: boolean }) { return <div className="flex items-center justify-between gap-4"><span className="text-sm text-white/65">{label}</span><b className={accent ? "text-xl text-[#69e0e7]" : ""}>{money(value)}</b></div>; }
+function ReportSplit({ title, icon: Icon, rows, total }: { title: string; icon: typeof Store; rows: Array<{ label: string; value: number }>; total: number }) { return <article className="rounded-[24px] bg-white p-5 shadow-sm"><div className="flex items-center gap-2"><Icon className="size-5 text-[#1697a8]" /><h3 className="font-black">{title}</h3></div><div className="mt-4 space-y-3">{rows.map((row) => <div key={row.label}><div className="flex justify-between text-sm"><span>{row.label}</span><b>{money(row.value)}</b></div><div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#1697a8]" style={{ width: `${total ? row.value / total * 100 : 0}%` }} /></div></div>)}</div></article>; }
+
 function EasyProductDialog({ open, onOpenChange, product, setProduct, saving, appPricingEnabled, onSave }: { open: boolean; onOpenChange: (value: boolean) => void; product: QuickProduct; setProduct: (value: QuickProduct) => void; saving: boolean; appPricingEnabled: boolean; onSave: () => void }) {
   const input = "mt-2 h-14 w-full rounded-2xl border-2 border-slate-100 bg-white px-4 text-lg font-bold outline-none focus:border-[#1697a8]";
   return <Dialog open={open} onOpenChange={onOpenChange}>
