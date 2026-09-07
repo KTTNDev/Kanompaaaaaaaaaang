@@ -32,6 +32,7 @@ export interface QuickOrderItem {
 }
 
 export interface QuickOrder {
+  clientOrderId?: string;
   orderNumber: string;
   createdAt: string;
   channel: QuickSalesChannel;

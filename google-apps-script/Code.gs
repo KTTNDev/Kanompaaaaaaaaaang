@@ -2,7 +2,7 @@ const SPREADSHEET_ID = "11TVIZinypm-mzrkj_LyUMrgCGUexytr-mTA8nBCLV-A";
 const TIME_ZONE = "Asia/Bangkok";
 const TABLES = {
   products: { sheet: "DB_PRODUCTS", headers: ["id", "sku", "name", "category", "price", "appPrice", "cost", "imageUrl", "active", "sortOrder", "trackStock", "currentStock", "minStock", "createdAt", "updatedAt"], numbers: ["price", "appPrice", "cost", "sortOrder", "currentStock", "minStock"], booleans: ["active", "trackStock"] },
-  orders: { sheet: "DB_ORDERS", headers: ["orderNumber", "createdAt", "channel", "paymentMethod", "subtotal", "discount", "total", "cost", "profit", "itemCount", "receivedAmount", "changeAmount", "status"], numbers: ["subtotal", "discount", "total", "cost", "profit", "itemCount", "receivedAmount", "changeAmount"], booleans: [] },
+  orders: { sheet: "DB_ORDERS", headers: ["orderNumber", "createdAt", "channel", "paymentMethod", "subtotal", "discount", "total", "cost", "profit", "itemCount", "receivedAmount", "changeAmount", "status", "clientOrderId"], numbers: ["subtotal", "discount", "total", "cost", "profit", "itemCount", "receivedAmount", "changeAmount"], booleans: [] },
   orderItems: { sheet: "DB_ORDER_ITEMS", headers: ["id", "orderNumber", "productId", "productName", "quantity", "unitPrice", "unitCost", "lineTotal", "lineCost"], numbers: ["quantity", "unitPrice", "unitCost", "lineTotal", "lineCost"], booleans: [] },
   expenses: { sheet: "DB_EXPENSES", headers: ["id", "createdAt", "category", "title", "amount", "note"], numbers: ["amount"], booleans: [] },
   waste: { sheet: "DB_WASTE", headers: ["id", "createdAt", "productId", "productName", "quantity", "unitCost", "totalCost", "reason", "note"], numbers: ["quantity", "unitCost", "totalCost"], booleans: [] },
@@ -62,6 +62,15 @@ function bootstrap_() {
 }
 
 function createOrder_(input) {
+  ensureDatabase_();
+  const clientOrderId = String(input.clientOrderId || "").trim();
+  if (clientOrderId) {
+    const duplicate = readTable_("orders").filter(function (order) { return String(order.clientOrderId || "") === clientOrderId; })[0];
+    if (duplicate) {
+      duplicate.items = readTable_("orderItems").filter(function (item) { return item.orderNumber === duplicate.orderNumber; });
+      return { ok: true, order: duplicate, duplicate: true };
+    }
+  }
   const products = readTableWithRows_("products");
   const productById = {};
   products.forEach(function (entry) { productById[entry.value.id] = entry; });
@@ -99,7 +108,7 @@ function createOrder_(input) {
   if (receivedAmount < total) throw new Error("ยอดเงินที่รับไม่เพียงพอ");
   const createdAt = now_();
   const orderNumber = "ORD-" + Utilities.formatDate(new Date(), TIME_ZONE, "yyyyMMdd-HHmmss") + "-" + Math.floor(Math.random() * 900 + 100);
-  const order = { orderNumber: orderNumber, createdAt: createdAt, channel: channel, paymentMethod: paymentMethod, subtotal: round_(subtotal), discount: round_(discount), total: total, cost: round_(cost), profit: round_(total - cost), itemCount: itemCount, receivedAmount: round_(receivedAmount), changeAmount: round_(receivedAmount - total), status: "COMPLETED" };
+  const order = { orderNumber: orderNumber, createdAt: createdAt, channel: channel, paymentMethod: paymentMethod, subtotal: round_(subtotal), discount: round_(discount), total: total, cost: round_(cost), profit: round_(total - cost), itemCount: itemCount, receivedAmount: round_(receivedAmount), changeAmount: round_(receivedAmount - total), status: "COMPLETED", clientOrderId: clientOrderId };
   appendObject_("orders", order);
   items.forEach(function (item) { item.orderNumber = orderNumber; appendObject_("orderItems", item); });
   order.items = items;

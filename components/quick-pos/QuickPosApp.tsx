@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, Banknote, Check, ChevronDown, ChevronRight, CirclePlus, Cloud, CreditCard, Minus, Pencil, Plus, QrCode, RefreshCw, Settings, ShoppingBag, Store, Trash2, Wallet } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { getPendingOrders, markPendingOrderFailed, removePendingOrder, savePendingOrder, type QueuedOrderInput } from "@/lib/pos-sync-queue";
 import { sheetRequest } from "@/lib/sheets-client";
 import type { QuickBootstrap, QuickOrder, QuickPaymentMethod, QuickProduct, QuickSalesChannel } from "@/types/sheets";
 
@@ -42,6 +43,9 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
   const [discount, setDiscount] = useState(0);
   const [success, setSuccess] = useState<QuickOrder | null>(null);
   const [saving, setSaving] = useState(false);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const syncingRef = useRef(false);
   const [productOpen, setProductOpen] = useState(false);
   const [productDraft, setProductDraft] = useState<QuickProduct>(emptyProduct);
   const [rangeDays, setRangeDays] = useState(1);
@@ -54,10 +58,51 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
     catch (error) { setMessage(error instanceof Error ? error.message : "เชื่อมต่อไม่ได้"); const saved = window.localStorage.getItem(LOCAL_KEY); setData(saved ? JSON.parse(saved) as QuickBootstrap : demoData()); }
     finally { setLoading(false); }
   };
+
+  const syncPendingOrders = async () => {
+    if (syncingRef.current) return;
+    const pendingOrders = await getPendingOrders();
+    setPendingSyncCount(pendingOrders.length);
+    if (!pendingOrders.length || !navigator.onLine) return;
+    syncingRef.current = true;
+    setSyncing(true);
+    let syncFailed = false;
+    try {
+      for (const pending of pendingOrders) {
+        try {
+          const result = await sheetRequest<{ ok: boolean; order: QuickOrder }>("order.create", { order: pending.order });
+          await removePendingOrder(pending.id);
+          setData((current) => {
+            const exists = current.orders.some((order) => order.clientOrderId === pending.id);
+            return { ...current, orders: exists ? current.orders.map((order) => order.clientOrderId === pending.id ? result.order : order) : [result.order, ...current.orders] };
+          });
+        } catch (error) {
+          await markPendingOrderFailed(pending, error);
+          syncFailed = true;
+          break;
+        }
+      }
+    } finally {
+      const remainingCount = (await getPendingOrders()).length;
+      setPendingSyncCount(remainingCount);
+      syncingRef.current = false;
+      setSyncing(false);
+      if (remainingCount > 0 && !syncFailed && navigator.onLine) window.setTimeout(() => void syncPendingOrders(), 0);
+    }
+  };
+
   useEffect(() => {
     const allowAppPricing = window.localStorage.getItem(APP_PRICING_KEY) === "true";
-    const initialLoad = window.setTimeout(() => { setAppPricingEnabled(allowAppPricing); void load(allowAppPricing); }, 0);
-    return () => window.clearTimeout(initialLoad);
+    const initialLoad = window.setTimeout(() => { setAppPricingEnabled(allowAppPricing); void load(allowAppPricing).finally(() => void syncPendingOrders()); }, 0);
+    const retrySync = () => void syncPendingOrders();
+    const syncWhenVisible = () => { if (document.visibilityState === "visible") void syncPendingOrders(); };
+    window.addEventListener("online", retrySync);
+    document.addEventListener("visibilitychange", syncWhenVisible);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.removeEventListener("online", retrySync);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+    };
     // load intentionally runs only once when the POS starts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -80,19 +125,22 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
     if (!cart.length || saving) return;
     setSaving(true); setMessage("");
     try {
-      let order: QuickOrder;
-      if (connected) {
-        const result = await sheetRequest<{ ok: boolean; order: QuickOrder }>("order.create", { order: { channel, paymentMethod: method, discount, receivedAmount: method === "CASH" ? amount : total, items: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity })) } });
-        order = result.order;
-        const refreshed = await sheetRequest<QuickBootstrap>("bootstrap"); setData({ ...refreshed, source: "GOOGLE_SHEETS" });
-      } else {
-        const cost = cart.reduce((sum, line) => sum + line.product.cost * line.quantity, 0);
-        order = { orderNumber: `DEMO-${Date.now()}`, createdAt: now(), channel, paymentMethod: method, subtotal, discount, total, cost, profit: total - cost, itemCount, receivedAmount: method === "CASH" ? amount : total, changeAmount: method === "CASH" ? Math.max(0, amount - total) : 0, status: "COMPLETED", items: cart.map((line) => { const unitPrice = channel === "APP" ? line.product.appPrice || line.product.price : line.product.price; return { id: newId(), orderNumber: "", productId: line.product.id, productName: line.product.name, quantity: line.quantity, unitPrice, unitCost: line.product.cost, lineTotal: unitPrice * line.quantity, lineCost: line.product.cost * line.quantity }; }) };
-        persistLocal({ ...data, orders: [order, ...data.orders] });
-      }
+      const clientOrderId = newId();
+      const createdAt = now();
+      const orderInput: QueuedOrderInput = { clientOrderId, channel, paymentMethod: method, discount, receivedAmount: method === "CASH" ? amount : total, items: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity })) };
+      const cost = cart.reduce((sum, line) => sum + line.product.cost * line.quantity, 0);
+      const orderNumber = `LOCAL-${clientOrderId.slice(0, 8).toUpperCase()}`;
+      const order: QuickOrder = { clientOrderId, orderNumber, createdAt, channel, paymentMethod: method, subtotal, discount, total, cost, profit: total - cost, itemCount, receivedAmount: orderInput.receivedAmount, changeAmount: method === "CASH" ? Math.max(0, amount - total) : 0, status: "COMPLETED", items: cart.map((line) => { const unitPrice = channel === "APP" ? line.product.appPrice || line.product.price : line.product.price; return { id: newId(), orderNumber, productId: line.product.id, productName: line.product.name, quantity: line.quantity, unitPrice, unitCost: line.product.cost, lineTotal: unitPrice * line.quantity, lineCost: line.product.cost * line.quantity }; }) };
+      await savePendingOrder({ id: clientOrderId, createdAt, order: orderInput, attempts: 0, lastError: "" });
+      setPendingSyncCount((count) => count + 1);
+      setData((current) => ({ ...current, orders: [order, ...current.orders] }));
       setSuccess(order); setCart([]); setDiscount(0); setPaymentOpen(false);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "บันทึกบิลไม่สำเร็จ"); }
-    finally { setSaving(false); }
+      setSaving(false);
+      void syncPendingOrders();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "บันทึกบิลในเครื่องไม่สำเร็จ");
+      setSaving(false);
+    }
   };
 
   const saveProduct = async () => {
@@ -113,7 +161,7 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
   };
 
   return <div className="min-h-dvh bg-[#f2f4f4] pb-28 text-[#153f46]">
-    <header className="sticky top-0 z-30 border-b border-black/5 bg-white/95 backdrop-blur"><div className="mx-auto flex h-20 max-w-[1500px] items-center justify-between px-5 lg:px-8"><div className="flex items-center gap-3"><div className="grid size-12 place-items-center rounded-2xl bg-[#daf3f5] text-[#168f9f]"><Store className="size-7" /></div><div><p className="text-xl font-black">{data.settings.storeName}</p><p className="text-xs text-slate-400">POS ร้านเล็ก · จบการขายในไม่กี่จิ้ม</p></div></div><div className="flex items-center gap-2"><span className={`hidden rounded-full px-3 py-1.5 text-xs font-bold sm:inline ${connected ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}><span className={`mr-1.5 inline-block size-2 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500"}`} />{connected ? "Google Sheet พร้อม" : "โหมดทดลองในเครื่อง"}</span><button onClick={() => void load()} className="grid size-11 place-items-center rounded-xl bg-slate-100" aria-label="รีเฟรช"><RefreshCw className={`size-5 ${loading ? "animate-spin" : ""}`} /></button></div></div></header>
+    <header className="sticky top-0 z-30 border-b border-black/5 bg-white/95 backdrop-blur"><div className="mx-auto flex h-20 max-w-[1500px] items-center justify-between px-5 lg:px-8"><div className="flex items-center gap-3"><div className="grid size-12 place-items-center rounded-2xl bg-[#daf3f5] text-[#168f9f]"><Store className="size-7" /></div><div><p className="text-xl font-black">{data.settings.storeName}</p><p className="text-xs text-slate-400">POS ร้านเล็ก · จบการขายในไม่กี่จิ้ม</p></div></div><div className="flex items-center gap-2"><span className={`hidden rounded-full px-3 py-1.5 text-xs font-bold sm:inline ${pendingSyncCount > 0 ? "bg-amber-50 text-amber-700" : connected ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}><span className={`mr-1.5 inline-block size-2 rounded-full ${pendingSyncCount > 0 ? "bg-amber-500" : connected ? "bg-emerald-500" : "bg-slate-400"}`} />{pendingSyncCount > 0 ? syncing ? `กำลังซิงก์ ${pendingSyncCount} บิล` : `รอซิงก์ ${pendingSyncCount} บิล` : connected ? "ข้อมูลล่าสุดแล้ว" : "เก็บข้อมูลในเครื่อง"}</span><button onClick={() => { void load(); void syncPendingOrders(); }} className="grid size-11 place-items-center rounded-xl bg-slate-100" aria-label="รีเฟรชและซิงก์"><RefreshCw className={`size-5 ${loading || syncing ? "animate-spin" : ""}`} /></button></div></div></header>
 
     {message && <div className="mx-auto mt-4 max-w-[1450px] px-5"><div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">{message}</div></div>}
 
@@ -128,7 +176,7 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
     </main>}
 
     {view === "reports" && <ReportsView data={data} days={rangeDays} setDays={setRangeDays} />}
-    {view === "settings" && <EasySettingsView data={data} connected={connected} appPricingEnabled={appPricingEnabled} onAppPricingChange={changeAppPricingSetting} onRefresh={() => void load()} onAdd={() => { setProductDraft(emptyProduct()); setProductOpen(true); }} onEdit={(product) => { setProductDraft(product); setProductOpen(true); }} onArchive={(product) => void archiveProduct(product)} />}
+    {view === "settings" && <EasySettingsView data={data} connected={connected} pendingSyncCount={pendingSyncCount} syncing={syncing} appPricingEnabled={appPricingEnabled} onAppPricingChange={changeAppPricingSetting} onRefresh={() => void load()} onSync={() => void syncPendingOrders()} onAdd={() => { setProductDraft(emptyProduct()); setProductOpen(true); }} onEdit={(product) => { setProductDraft(product); setProductOpen(true); }} onArchive={(product) => void archiveProduct(product)} />}
 
     <nav className="fixed inset-x-0 bottom-0 z-40 grid h-20 grid-cols-3 border-t bg-white pb-[env(safe-area-inset-bottom)] lg:hidden"><NavButton active={view === "reports"} icon={BarChart3} label="รายงาน" onClick={() => setView("reports")} /><NavButton active={view === "sale"} icon={Store} label="ขายของ" onClick={() => setView("sale")} /><NavButton active={view === "settings"} icon={Settings} label="ตั้งค่า" onClick={() => setView("settings")} /></nav>
     <nav className="fixed bottom-7 left-1/2 z-40 hidden -translate-x-1/2 gap-2 rounded-full bg-white/95 p-2 shadow-2xl backdrop-blur lg:flex"><NavButton active={view === "reports"} icon={BarChart3} label="รายงาน" onClick={() => setView("reports")} /><NavButton active={view === "sale"} icon={Store} label="ขายของ" onClick={() => setView("sale")} /><NavButton active={view === "settings"} icon={Settings} label="ตั้งค่า" onClick={() => setView("settings")} /></nav>
@@ -185,7 +233,7 @@ function EasyProductDialog({ open, onOpenChange, product, setProduct, saving, ap
   </Dialog>;
 }
 
-function EasySettingsView({ data, connected, appPricingEnabled, onAppPricingChange, onRefresh, onAdd, onEdit, onArchive }: { data: QuickBootstrap; connected: boolean; appPricingEnabled: boolean; onAppPricingChange: (enabled: boolean) => void; onRefresh: () => void; onAdd: () => void; onEdit: (product: QuickProduct) => void; onArchive: (product: QuickProduct) => void }) {
+function EasySettingsView({ data, connected, pendingSyncCount, syncing, appPricingEnabled, onAppPricingChange, onRefresh, onSync, onAdd, onEdit, onArchive }: { data: QuickBootstrap; connected: boolean; pendingSyncCount: number; syncing: boolean; appPricingEnabled: boolean; onAppPricingChange: (enabled: boolean) => void; onRefresh: () => void; onSync: () => void; onAdd: () => void; onEdit: (product: QuickProduct) => void; onArchive: (product: QuickProduct) => void }) {
   const [query, setQuery] = useState("");
   const products = data.products.filter((product) => product.active && product.name.toLocaleLowerCase("th").includes(query.trim().toLocaleLowerCase("th")));
   return <main className="mx-auto max-w-5xl p-4 pb-40 sm:p-5 sm:pb-40 lg:p-8 lg:pb-40">
@@ -194,9 +242,9 @@ function EasySettingsView({ data, connected, appPricingEnabled, onAppPricingChan
       <Button onClick={onAdd} className="h-14 rounded-2xl bg-[#1697a8] px-5 font-black"><CirclePlus className="size-5" />เพิ่มสินค้า</Button>
     </div>
 
-    <section className="mt-5 flex items-center justify-between gap-4 rounded-2xl bg-[#153f46] p-4 text-white">
-      <div className="flex min-w-0 items-center gap-3"><Cloud className="size-6 shrink-0 text-[#55d5df]" /><div className="min-w-0"><p className="font-black">Google Sheet เชื่อมอัตโนมัติ</p><p className="truncate text-xs text-white/60">{connected ? "พร้อมอ่านและบันทึกข้อมูล" : "กำลังใช้ข้อมูลสำรองในเครื่อง"}</p></div></div>
-      <button onClick={onRefresh} className="grid size-12 shrink-0 place-items-center rounded-xl bg-white/10" aria-label="รีเฟรชฐานข้อมูล"><RefreshCw className="size-5" /></button>
+    <section className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-[#153f46] p-4 text-white">
+      <div className="flex min-w-0 items-center gap-3"><Cloud className="size-6 shrink-0 text-[#55d5df]" /><div className="min-w-0"><p className="font-black">บันทึกเร็วใน iPad และซิงก์อัตโนมัติ</p><p className="truncate text-xs text-white/60">{pendingSyncCount > 0 ? `${syncing ? "กำลังส่ง" : "รอส่ง"} ${pendingSyncCount} บิลไป Google Sheet` : connected ? "ข้อมูลทั้งหมดส่งไป Google Sheet แล้ว" : "ข้อมูลใหม่จะเก็บในเครื่องจนกว่าอินเทอร์เน็ตกลับมา"}</p></div></div>
+      <div className="flex gap-2"><button onClick={onRefresh} className="grid size-12 shrink-0 place-items-center rounded-xl bg-white/10" aria-label="โหลดข้อมูลสินค้าใหม่"><RefreshCw className="size-5" /></button><Button onClick={onSync} disabled={syncing || pendingSyncCount === 0} className="h-12 rounded-xl bg-[#1697a8] px-4 font-black">{syncing ? "กำลังซิงก์" : pendingSyncCount > 0 ? `ซิงก์ตอนนี้ (${pendingSyncCount})` : "ซิงก์แล้ว"}</Button></div>
     </section>
 
     <section className="mt-4 rounded-2xl bg-white p-4 shadow-sm">
