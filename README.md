@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# BreadFlow POS · Google Sheets Edition
 
-## Getting Started
+POS สำหรับร้านขนมปังขนาดเล็ก ออกแบบให้แม่ค้าจบการขายภายใน 2–3 จิ้ม และใช้ Google Sheet เป็นฐานข้อมูลหลัก ไม่มี SQLite, PostgreSQL หรือเซิร์ฟเวอร์ฐานข้อมูล
 
-First, run the development server:
+## วิธีขาย
+
+1. จิ้มการ์ดสินค้า เมนูเดิมซ้ำจะเพิ่มจำนวนทันที
+2. ถ้ารับเงินพอดี จิ้ม **รับเงินสดพอดี** เพื่อบันทึกบิลทันที
+3. ถ้าต้องทอนหรือรับ QR/บัตร จิ้ม **เงินทอน / QR / บัตร** แล้วเลือกวิธีชำระ
+
+ไม่มีหน้าต่างเลือกท็อปปิง แต่ละรสเป็นสินค้าคนละเมนูและมีราคาจบในตัว
+
+## โครงสร้าง
+
+- Next.js เป็นหน้าเว็บสำหรับ iPad และ proxy แบบ serverless
+- Google Apps Script เป็น API ที่ Google ดูแลให้
+- Google Sheet `ฐานข้อมูล` เป็นแหล่งข้อมูลหลักสำหรับสินค้า บิล รายการขาย ค่าใช้จ่าย และของเสีย
+- Local Storage ใช้เฉพาะโหมดทดลองก่อนเชื่อม Google Apps Script
+
+## เชื่อม Google Sheet ครั้งแรก
+
+1. เปิด Google Sheet `ฐานข้อมูล`
+2. ไปที่ **ส่วนขยาย → Apps Script**
+3. นำโค้ดจาก `google-apps-script/Code.gs` ไปแทนในไฟล์ `Code.gs`
+4. ตั้งค่า Project Settings → Time zone เป็น Bangkok
+5. กด **Deploy → New deployment → Web app**
+6. Execute as: Me, Who has access: Anyone
+7. คัดลอก URL ที่ลงท้าย `/exec`
+8. เปิดหน้า **ตั้งค่า** ใน POS วาง URL และกดเชื่อมต่อ
+
+URL ถูกจำไว้ใน iPad เครื่องนั้น หลังเชื่อมแล้วทุก CRUD และทุกบิลจะอ่าน/เขียน Google Sheet
+
+## เปิดโปรเจกต์
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+เปิด `http://localhost:3000`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## ตรวจระบบ
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run typecheck
+npm run lint
+npm run build
+```
 
-## Learn More
+## ตารางหลักใน Google Sheet
 
-To learn more about Next.js, take a look at the following resources:
+- `DB_PRODUCTS` สินค้า ราคา ต้นทุน หมวด รูป และสต็อกสินค้า
+- `DB_ORDERS` หัวบิล ยอดรวม ส่วนลด ต้นทุน กำไร วิธีชำระ และเงินทอน
+- `DB_ORDER_ITEMS` รายการสินค้าในแต่ละบิล
+- `DB_EXPENSES` ค่าใช้จ่าย
+- `DB_WASTE` สินค้าทิ้ง/เสีย
+- `DB_SETTINGS` ชื่อร้านและค่าเริ่มต้น
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+ไฟล์ `prisma` และฐานข้อมูล SQL เดิมถูกถอดออกจากระบบแล้ว
