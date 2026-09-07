@@ -1,0 +1,13 @@
+.git
+.next
+node_modules
+.env*
+!.env.example
+legacy-sql-backup
+generated
+*.tsbuildinfo
+npm-debug.log*
+start-pos.cmd
+google-apps-script
+AGENTS.md
+CLAUDE.md
