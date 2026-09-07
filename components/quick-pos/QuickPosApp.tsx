@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, Banknote, Check, ChevronRight, CirclePlus, Cloud, CreditCard, Minus, Pencil, Plus, QrCode, RefreshCw, Settings, ShoppingBag, Store, Trash2, Wallet } from "lucide-react";
+import { BarChart3, Banknote, Check, ChevronDown, ChevronRight, CirclePlus, Cloud, CreditCard, Minus, Pencil, Plus, QrCode, RefreshCw, Settings, ShoppingBag, Store, Trash2, Wallet } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { getSavedScriptUrl, saveScriptUrl, sheetRequest } from "@/lib/sheets-client";
+import { sheetRequest } from "@/lib/sheets-client";
 import type { QuickBootstrap, QuickOrder, QuickPaymentMethod, QuickProduct, QuickSalesChannel } from "@/types/sheets";
 
 type View = "sale" | "reports" | "settings";
@@ -14,6 +14,7 @@ const money = (value: number) => new Intl.NumberFormat("th-TH", { style: "curren
 const now = () => new Date().toISOString();
 const newId = () => globalThis.crypto?.randomUUID?.() ?? `local-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 const LOCAL_KEY = "breadflow-local-v1";
+const APP_PRICING_KEY = "breadflow-app-pricing-enabled";
 const demoProducts: QuickProduct[] = [
   { id: "demo-chocolate", sku: "BRD-001", name: "ขนมปังช็อกโกแลต", category: "ขนมปัง", price: 30, appPrice: 35, cost: 10, imageUrl: "", active: true, sortOrder: 1, trackStock: false, currentStock: 0, minStock: 0 },
   { id: "demo-jam", sku: "BRD-002", name: "ขนมปังแยม", category: "ขนมปัง", price: 20, appPrice: 25, cost: 7, imageUrl: "", active: true, sortOrder: 2, trackStock: false, currentStock: 0, minStock: 0 },
@@ -31,9 +32,9 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
   const [data, setData] = useState<QuickBootstrap>(demoData);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
-  const [scriptUrl, setScriptUrl] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [channel, setChannel] = useState<QuickSalesChannel>("STORE");
+  const [appPricingEnabled, setAppPricingEnabled] = useState(false);
   const [category, setCategory] = useState("ทั้งหมด");
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [payment, setPayment] = useState<QuickPaymentMethod>("CASH");
@@ -47,20 +48,25 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
 
   const connected = data.source === "GOOGLE_SHEETS";
   const persistLocal = (next: QuickBootstrap) => { setData(next); window.localStorage.setItem(LOCAL_KEY, JSON.stringify(next)); };
-  const load = async (url = getSavedScriptUrl()) => {
-    setLoading(true); setMessage(""); setScriptUrl(url);
-    if (!url) {
-      const saved = window.localStorage.getItem(LOCAL_KEY);
-      setData(saved ? JSON.parse(saved) as QuickBootstrap : demoData()); setLoading(false); return;
-    }
-    try { const result = await sheetRequest<QuickBootstrap>("bootstrap", undefined, url); setData({ ...result, source: "GOOGLE_SHEETS" }); setChannel(result.settings.defaultChannel || "STORE"); }
+  const load = async (allowAppPricing = appPricingEnabled) => {
+    setLoading(true); setMessage("");
+    try { const result = await sheetRequest<QuickBootstrap>("bootstrap"); setData({ ...result, source: "GOOGLE_SHEETS" }); setChannel(allowAppPricing && result.settings.defaultChannel === "APP" ? "APP" : "STORE"); }
     catch (error) { setMessage(error instanceof Error ? error.message : "เชื่อมต่อไม่ได้"); const saved = window.localStorage.getItem(LOCAL_KEY); setData(saved ? JSON.parse(saved) as QuickBootstrap : demoData()); }
     finally { setLoading(false); }
   };
   useEffect(() => {
-    const initialLoad = window.setTimeout(() => { void load(); }, 0);
+    const allowAppPricing = window.localStorage.getItem(APP_PRICING_KEY) === "true";
+    const initialLoad = window.setTimeout(() => { setAppPricingEnabled(allowAppPricing); void load(allowAppPricing); }, 0);
     return () => window.clearTimeout(initialLoad);
+    // load intentionally runs only once when the POS starts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const changeAppPricingSetting = (enabled: boolean) => {
+    setAppPricingEnabled(enabled);
+    window.localStorage.setItem(APP_PRICING_KEY, String(enabled));
+    if (!enabled) setChannel("STORE");
+  };
 
   const categories = useMemo(() => ["ทั้งหมด", ...new Set(data.products.filter((product) => product.active).map((product) => product.category || "ทั่วไป"))], [data.products]);
   const visibleProducts = data.products.filter((product) => product.active && (category === "ทั้งหมด" || product.category === category)).sort((a, b) => a.sortOrder - b.sortOrder);
@@ -76,9 +82,9 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
     try {
       let order: QuickOrder;
       if (connected) {
-        const result = await sheetRequest<{ ok: boolean; order: QuickOrder }>("order.create", { order: { channel, paymentMethod: method, discount, receivedAmount: method === "CASH" ? amount : total, items: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity })) } }, scriptUrl);
+        const result = await sheetRequest<{ ok: boolean; order: QuickOrder }>("order.create", { order: { channel, paymentMethod: method, discount, receivedAmount: method === "CASH" ? amount : total, items: cart.map((line) => ({ productId: line.product.id, quantity: line.quantity })) } });
         order = result.order;
-        const refreshed = await sheetRequest<QuickBootstrap>("bootstrap", undefined, scriptUrl); setData({ ...refreshed, source: "GOOGLE_SHEETS" });
+        const refreshed = await sheetRequest<QuickBootstrap>("bootstrap"); setData({ ...refreshed, source: "GOOGLE_SHEETS" });
       } else {
         const cost = cart.reduce((sum, line) => sum + line.product.cost * line.quantity, 0);
         order = { orderNumber: `DEMO-${Date.now()}`, createdAt: now(), channel, paymentMethod: method, subtotal, discount, total, cost, profit: total - cost, itemCount, receivedAmount: method === "CASH" ? amount : total, changeAmount: method === "CASH" ? Math.max(0, amount - total) : 0, status: "COMPLETED", items: cart.map((line) => { const unitPrice = channel === "APP" ? line.product.appPrice || line.product.price : line.product.price; return { id: newId(), orderNumber: "", productId: line.product.id, productName: line.product.name, quantity: line.quantity, unitPrice, unitCost: line.product.cost, lineTotal: unitPrice * line.quantity, lineCost: line.product.cost * line.quantity }; }) };
@@ -94,7 +100,7 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
     setSaving(true);
     try {
       const normalized = { ...productDraft, id: productDraft.id || newId(), appPrice: productDraft.appPrice || productDraft.price };
-      if (connected) { await sheetRequest("product.save", { product: normalized }, scriptUrl); await load(scriptUrl); }
+      if (connected) { await sheetRequest("product.save", { product: normalized }); await load(); }
       else { const exists = data.products.some((product) => product.id === normalized.id); persistLocal({ ...data, products: exists ? data.products.map((product) => product.id === normalized.id ? normalized : product) : [...data.products, normalized] }); }
       setProductOpen(false); setMessage("");
     } catch (error) { setMessage(error instanceof Error ? error.message : "บันทึกสินค้าไม่สำเร็จ"); }
@@ -102,34 +108,34 @@ export function QuickPosApp({ initialView = "sale" }: { initialView?: View }) {
   };
 
   const archiveProduct = async (product: QuickProduct) => {
-    if (connected) { await sheetRequest("product.archive", { id: product.id }, scriptUrl); await load(scriptUrl); }
+    if (connected) { await sheetRequest("product.archive", { id: product.id }); await load(); }
     else persistLocal({ ...data, products: data.products.map((item) => item.id === product.id ? { ...item, active: false } : item) });
   };
 
-  return <div className="min-h-dvh bg-[#f2f4f4] pb-24 text-[#153f46] lg:pb-0">
-    <header className="sticky top-0 z-30 border-b border-black/5 bg-white/95 backdrop-blur"><div className="mx-auto flex h-20 max-w-[1500px] items-center justify-between px-5 lg:px-8"><div className="flex items-center gap-3"><div className="grid size-12 place-items-center rounded-2xl bg-[#daf3f5] text-[#168f9f]"><Store className="size-7" /></div><div><p className="text-xl font-black">{data.settings.storeName}</p><p className="text-xs text-slate-400">POS ร้านเล็ก · จบการขายในไม่กี่จิ้ม</p></div></div><div className="flex items-center gap-2"><span className={`hidden rounded-full px-3 py-1.5 text-xs font-bold sm:inline ${connected ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}><span className={`mr-1.5 inline-block size-2 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500"}`} />{connected ? "Google Sheet พร้อม" : "โหมดทดลองในเครื่อง"}</span><button onClick={() => void load(scriptUrl)} className="grid size-11 place-items-center rounded-xl bg-slate-100" aria-label="รีเฟรช"><RefreshCw className={`size-5 ${loading ? "animate-spin" : ""}`} /></button></div></div></header>
+  return <div className="min-h-dvh bg-[#f2f4f4] pb-28 text-[#153f46]">
+    <header className="sticky top-0 z-30 border-b border-black/5 bg-white/95 backdrop-blur"><div className="mx-auto flex h-20 max-w-[1500px] items-center justify-between px-5 lg:px-8"><div className="flex items-center gap-3"><div className="grid size-12 place-items-center rounded-2xl bg-[#daf3f5] text-[#168f9f]"><Store className="size-7" /></div><div><p className="text-xl font-black">{data.settings.storeName}</p><p className="text-xs text-slate-400">POS ร้านเล็ก · จบการขายในไม่กี่จิ้ม</p></div></div><div className="flex items-center gap-2"><span className={`hidden rounded-full px-3 py-1.5 text-xs font-bold sm:inline ${connected ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}><span className={`mr-1.5 inline-block size-2 rounded-full ${connected ? "bg-emerald-500" : "bg-amber-500"}`} />{connected ? "Google Sheet พร้อม" : "โหมดทดลองในเครื่อง"}</span><button onClick={() => void load()} className="grid size-11 place-items-center rounded-xl bg-slate-100" aria-label="รีเฟรช"><RefreshCw className={`size-5 ${loading ? "animate-spin" : ""}`} /></button></div></div></header>
 
     {message && <div className="mx-auto mt-4 max-w-[1450px] px-5"><div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">{message}</div></div>}
 
     {view === "sale" && <main className="mx-auto grid min-h-[calc(100dvh-5rem)] max-w-[1500px] lg:grid-cols-[minmax(0,1fr)_390px]">
-      <section className="min-w-0 p-5 lg:p-8"><div className="rounded-[28px] bg-[#1596a7] p-5 text-white shadow-lg shadow-cyan-900/10"><div className="flex items-center justify-between"><div><p className="text-sm text-white/75">ยอดวันนี้</p><p className="mt-1 text-3xl font-black">{money(data.orders.filter((order) => new Date(order.createdAt).toDateString() === new Date().toDateString() && order.status === "COMPLETED").reduce((sum, order) => sum + order.total, 0))}</p></div><div className="text-right"><p className="text-sm text-white/75">จำนวนบิล</p><p className="text-3xl font-black">{data.orders.filter((order) => new Date(order.createdAt).toDateString() === new Date().toDateString()).length}</p></div></div></div>
-      <div className="mt-6"><div className="flex items-center justify-between"><h2 className="text-xl font-black">หมวดหมู่</h2><button onClick={() => { setProductDraft(emptyProduct()); setProductOpen(true); }} className="flex size-11 items-center justify-center rounded-full bg-[#d9f2f4] text-[#158b9a]"><Plus className="size-6" /></button></div><div className="mt-3 flex gap-3 overflow-x-auto pb-2">{categories.map((item) => <button key={item} onClick={() => setCategory(item)} className={`min-h-12 shrink-0 rounded-full px-5 font-bold shadow-sm ${category === item ? "bg-[#1697a8] text-white" : "bg-white"}`}>{item}<span className="ml-2 rounded-full bg-black/5 px-2 py-0.5 text-xs">{item === "ทั้งหมด" ? data.products.filter((p) => p.active).length : data.products.filter((p) => p.active && p.category === item).length}</span></button>)}</div></div>
-      <div className="mt-5 flex items-center justify-between"><h2 className="text-xl font-black">รายการสินค้า</h2><div className="flex rounded-full bg-white p-1 shadow-sm"><button onClick={() => setChannel("STORE")} className={`rounded-full px-4 py-2 text-sm font-bold ${channel === "STORE" ? "bg-[#d8f1f3] text-[#147f8c]" : "text-slate-400"}`}>หน้าร้าน</button><button onClick={() => setChannel("APP")} className={`rounded-full px-4 py-2 text-sm font-bold ${channel === "APP" ? "bg-[#d8f1f3] text-[#147f8c]" : "text-slate-400"}`}>แอป</button></div></div>
-      <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">{visibleProducts.map((product) => <button key={product.id} onClick={() => addToCart(product)} className="group overflow-hidden rounded-[26px] bg-white text-left shadow-[0_12px_30px_rgba(26,57,62,.09)] transition active:scale-95"><div className="relative aspect-[4/3] bg-gradient-to-br from-[#dff4f5] via-[#f7ecda] to-[#f8d8c9] bg-cover bg-center" style={product.imageUrl ? { backgroundImage: `url(${product.imageUrl})` } : undefined}><div className="absolute left-3 top-3 rounded-full bg-white/90 px-3 py-1 text-lg font-black text-[#126f7a]">{money(channel === "APP" ? product.appPrice || product.price : product.price)}</div>{!product.imageUrl && <div className="grid h-full place-items-center text-6xl">🍞</div>}<div className="absolute bottom-3 right-3 grid size-11 place-items-center rounded-full bg-white text-[#168f9f] shadow"><Plus className="size-6" /></div></div><div className="p-4"><p className="line-clamp-2 min-h-12 text-base font-black">{product.name}</p><p className="mt-1 text-xs text-slate-400">ต้นทุน {money(product.cost)}</p></div></button>)}</div></section>
+      <section className="min-w-0 p-4 pb-40 sm:p-5 sm:pb-40 lg:p-8 lg:pb-40">
+      <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-bold text-slate-400">เลือกสินค้าเพื่อเพิ่มลงบิล</p><h1 className="text-2xl font-black">รายการสินค้า</h1></div>{appPricingEnabled && <div className="flex rounded-full bg-white p-1 shadow-sm"><button onClick={() => setChannel("STORE")} className={`min-h-11 rounded-full px-4 text-sm font-bold ${channel === "STORE" ? "bg-[#d8f1f3] text-[#147f8c]" : "text-slate-400"}`}>หน้าร้าน</button><button onClick={() => setChannel("APP")} className={`min-h-11 rounded-full px-4 text-sm font-bold ${channel === "APP" ? "bg-[#d8f1f3] text-[#147f8c]" : "text-slate-400"}`}>แอป</button></div>}</div>
+      <details className="group mt-4 rounded-2xl bg-white shadow-sm"><summary className="flex min-h-12 cursor-pointer list-none items-center justify-between px-4 font-bold"><span>หมวดสินค้า: <b className="text-[#168f9f]">{category}</b></span><ChevronDown className="size-5 transition group-open:rotate-180" /></summary><div className="flex gap-2 overflow-x-auto border-t px-3 py-3">{categories.map((item) => <button key={item} onClick={() => setCategory(item)} className={`min-h-11 shrink-0 rounded-full px-4 text-sm font-bold ${category === item ? "bg-[#1697a8] text-white" : "bg-slate-100"}`}>{item}<span className="ml-2 opacity-60">{item === "ทั้งหมด" ? data.products.filter((p) => p.active).length : data.products.filter((p) => p.active && p.category === item).length}</span></button>)}</div></details>
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">{visibleProducts.map((product) => <button key={product.id} onClick={() => addToCart(product)} className="group overflow-hidden rounded-[22px] bg-white text-left shadow-[0_10px_24px_rgba(26,57,62,.08)] transition active:scale-95"><div className="relative aspect-[16/10] bg-gradient-to-br from-[#dff4f5] via-[#f7ecda] to-[#f8d8c9] bg-cover bg-center" style={product.imageUrl ? { backgroundImage: `url(${product.imageUrl})` } : undefined}><div className="absolute left-2.5 top-2.5 rounded-full bg-white/95 px-3 py-1 text-base font-black text-[#126f7a]">{money(channel === "APP" ? product.appPrice || product.price : product.price)}</div>{!product.imageUrl && <div className="grid h-full place-items-center text-5xl">🍞</div>}<div className="absolute bottom-2.5 right-2.5 grid size-10 place-items-center rounded-full bg-white text-[#168f9f] shadow"><Plus className="size-5" /></div></div><div className="p-3.5"><p className="line-clamp-2 min-h-11 text-base font-black">{product.name}</p></div></button>)}</div></section>
 
       <aside className="sticky top-20 hidden h-[calc(100dvh-5rem)] flex-col border-l bg-white lg:flex"><div className="border-b p-6"><p className="text-sm text-slate-400">ออร์เดอร์ปัจจุบัน</p><div className="mt-1 flex items-center justify-between"><h2 className="text-2xl font-black">{itemCount} รายการ</h2>{cart.length > 0 && <button onClick={() => setCart([])} className="text-sm font-bold text-rose-500">ล้าง</button>}</div></div><div className="flex-1 overflow-y-auto p-5">{cart.length === 0 ? <div className="grid h-full place-items-center text-center"><div><ShoppingBag className="mx-auto size-14 text-slate-200" /><p className="mt-4 font-bold text-slate-400">จิ้มสินค้าเพื่อเริ่มขาย</p></div></div> : <div className="space-y-3">{cart.map((line) => <div key={line.product.id} className="rounded-2xl bg-[#f5f7f7] p-4"><div className="flex justify-between gap-3"><div><p className="font-black">{line.product.name}</p><p className="mt-1 text-sm text-slate-400">{money(channel === "APP" ? line.product.appPrice || line.product.price : line.product.price)} / ชิ้น</p></div><b className="text-lg">{money((channel === "APP" ? line.product.appPrice || line.product.price : line.product.price) * line.quantity)}</b></div><div className="mt-3 flex items-center justify-end gap-2"><button onClick={() => changeQuantity(line.product.id, -1)} className="grid size-10 place-items-center rounded-xl bg-white"><Minus className="size-4" /></button><b className="w-8 text-center">{line.quantity}</b><button onClick={() => changeQuantity(line.product.id, 1)} className="grid size-10 place-items-center rounded-xl bg-white"><Plus className="size-4" /></button></div></div>)}</div>}</div><CartFooter subtotal={subtotal} total={total} discount={discount} setDiscount={setDiscount} disabled={!cart.length || saving} onExact={() => void completeOrder("CASH", total)} onMore={() => { setPayment("CASH"); setReceived(total); setPaymentOpen(true); }} /></aside>
       {cart.length > 0 && <div className="fixed inset-x-3 bottom-24 z-30 rounded-[24px] bg-white p-3 shadow-2xl lg:hidden"><div className="flex items-center justify-between"><div><p className="text-xs text-slate-400">{itemCount} ชิ้น</p><p className="text-2xl font-black">{money(total)}</p></div><div className="flex gap-2"><Button onClick={() => void completeOrder("CASH", total)} disabled={saving} className="h-14 rounded-2xl bg-[#1697a8] px-5 font-black">เงินสดพอดี</Button><Button onClick={() => setPaymentOpen(true)} variant="outline" className="h-14 rounded-2xl px-4">อื่น ๆ</Button></div></div></div>}
     </main>}
 
     {view === "reports" && <ReportsView data={data} days={rangeDays} setDays={setRangeDays} />}
-    {view === "settings" && <SettingsView data={data} connected={connected} scriptUrl={scriptUrl} setScriptUrl={setScriptUrl} onConnect={() => { saveScriptUrl(scriptUrl); void load(scriptUrl); }} onAdd={() => { setProductDraft(emptyProduct()); setProductOpen(true); }} onEdit={(product) => { setProductDraft(product); setProductOpen(true); }} onArchive={(product) => void archiveProduct(product)} />}
+    {view === "settings" && <EasySettingsView data={data} connected={connected} appPricingEnabled={appPricingEnabled} onAppPricingChange={changeAppPricingSetting} onRefresh={() => void load()} onAdd={() => { setProductDraft(emptyProduct()); setProductOpen(true); }} onEdit={(product) => { setProductDraft(product); setProductOpen(true); }} onArchive={(product) => void archiveProduct(product)} />}
 
-    <nav className="fixed inset-x-0 bottom-0 z-40 grid h-20 grid-cols-3 border-t bg-white lg:hidden"><NavButton active={view === "reports"} icon={BarChart3} label="รายงาน" onClick={() => setView("reports")} /><NavButton active={view === "sale"} icon={Store} label="ขายของ" onClick={() => setView("sale")} /><NavButton active={view === "settings"} icon={Settings} label="ตั้งค่า" onClick={() => setView("settings")} /></nav>
+    <nav className="fixed inset-x-0 bottom-0 z-40 grid h-20 grid-cols-3 border-t bg-white pb-[env(safe-area-inset-bottom)] lg:hidden"><NavButton active={view === "reports"} icon={BarChart3} label="รายงาน" onClick={() => setView("reports")} /><NavButton active={view === "sale"} icon={Store} label="ขายของ" onClick={() => setView("sale")} /><NavButton active={view === "settings"} icon={Settings} label="ตั้งค่า" onClick={() => setView("settings")} /></nav>
     <nav className="fixed bottom-7 left-1/2 z-40 hidden -translate-x-1/2 gap-2 rounded-full bg-white/95 p-2 shadow-2xl backdrop-blur lg:flex"><NavButton active={view === "reports"} icon={BarChart3} label="รายงาน" onClick={() => setView("reports")} /><NavButton active={view === "sale"} icon={Store} label="ขายของ" onClick={() => setView("sale")} /><NavButton active={view === "settings"} icon={Settings} label="ตั้งค่า" onClick={() => setView("settings")} /></nav>
 
     <PaymentDialog open={paymentOpen} onOpenChange={setPaymentOpen} payment={payment} setPayment={setPayment} total={total} received={received} setReceived={setReceived} saving={saving} onConfirm={() => void completeOrder(payment, payment === "CASH" ? received : total)} />
     <SuccessDialog order={success} onClose={() => setSuccess(null)} />
-    <ProductDialog open={productOpen} onOpenChange={setProductOpen} product={productDraft} setProduct={setProductDraft} saving={saving} onSave={() => void saveProduct()} />
+    <EasyProductDialog open={productOpen} onOpenChange={setProductOpen} product={productDraft} setProduct={setProductDraft} saving={saving} appPricingEnabled={appPricingEnabled} onSave={() => void saveProduct()} />
   </div>;
 }
 
@@ -149,4 +155,70 @@ function Metric({ dot, label, value, note }: { dot: string; label: string; value
 function ReportRow({ icon: Icon, title, description, value }: { icon: typeof Banknote; title: string; description: string; value: number }) { return <div className="flex items-center gap-4 border-b p-6 last:border-0"><Icon className="size-6 text-slate-400" /><div className="flex-1"><p className="font-black">{title}</p><p className="text-sm text-slate-400">{description}</p></div><b className="text-xl">{money(value)}</b><ChevronRight className="size-5 text-slate-300" /></div>; }
 
 function SettingsView({ data, connected, scriptUrl, setScriptUrl, onConnect, onAdd, onEdit, onArchive }: { data: QuickBootstrap; connected: boolean; scriptUrl: string; setScriptUrl: (value: string) => void; onConnect: () => void; onAdd: () => void; onEdit: (product: QuickProduct) => void; onArchive: (product: QuickProduct) => void }) { return <main className="mx-auto max-w-5xl p-5 pb-32 lg:p-8"><div><p className="text-sm text-slate-400">ตั้งค่าร้าน</p><h1 className="text-3xl font-black">สินค้าและ Google Sheet</h1></div><section className="mt-6 rounded-[30px] bg-[#153f46] p-6 text-white"><div className="flex items-center gap-3"><Cloud className="size-7 text-[#55d5df]" /><div><p className="font-black">ฐานข้อมูล Google Sheet</p><p className="text-sm text-white/60">{connected ? "เชื่อมต่อและอ่านข้อมูลสดแล้ว" : "วาง Web App URL เพียงครั้งเดียว"}</p></div></div><div className="mt-5 flex flex-col gap-3 sm:flex-row"><input value={scriptUrl} onChange={(e) => setScriptUrl(e.target.value)} placeholder="https://script.google.com/macros/s/.../exec" className="h-14 flex-1 rounded-2xl border border-white/20 bg-white/10 px-4 text-sm outline-none placeholder:text-white/30" /><Button onClick={onConnect} className="h-14 rounded-2xl bg-[#1697a8] px-6 font-black">เชื่อมต่อ</Button></div><p className="mt-3 text-xs leading-5 text-white/45">ใช้ไฟล์ google-apps-script/Code.gs ในโปรเจกต์เพื่อติดตั้ง Web App เข้ากับชีตฐานข้อมูล</p></section><section className="mt-7"><div className="flex items-center justify-between"><div><h2 className="text-xl font-black">รายการสินค้า</h2><p className="text-sm text-slate-400">แต่ละเมนูมีราคาจบในตัว จิ้มแล้วคิดเงินได้เลย</p></div><Button onClick={onAdd} className="h-12 rounded-full bg-[#1697a8] px-5 font-black"><CirclePlus className="size-5" />เพิ่มสินค้า</Button></div><div className="mt-4 grid gap-3 sm:grid-cols-2">{data.products.filter((product) => product.active).map((product) => <article key={product.id} className="flex items-center gap-4 rounded-[24px] bg-white p-4 shadow-sm"><div className="grid size-16 shrink-0 place-items-center rounded-2xl bg-[#e2f4f5] text-3xl">🍞</div><div className="min-w-0 flex-1"><p className="truncate font-black">{product.name}</p><p className="text-sm text-slate-400">ขาย {money(product.price)} · ทุน {money(product.cost)}</p></div><button onClick={() => onEdit(product)} className="grid size-11 place-items-center rounded-xl bg-slate-100"><Pencil className="size-4" /></button><button onClick={() => onArchive(product)} className="grid size-11 place-items-center rounded-xl bg-rose-50 text-rose-500"><Trash2 className="size-4" /></button></article>)}</div></section></main>; }
+function EasyProductDialog({ open, onOpenChange, product, setProduct, saving, appPricingEnabled, onSave }: { open: boolean; onOpenChange: (value: boolean) => void; product: QuickProduct; setProduct: (value: QuickProduct) => void; saving: boolean; appPricingEnabled: boolean; onSave: () => void }) {
+  const input = "mt-2 h-14 w-full rounded-2xl border-2 border-slate-100 bg-white px-4 text-lg font-bold outline-none focus:border-[#1697a8]";
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="max-h-[92dvh] overflow-y-auto rounded-[32px] sm:max-w-2xl">
+      <DialogHeader>
+        <DialogTitle className="text-2xl font-black">{product.id ? "แก้ไขสินค้า" : "เพิ่มสินค้า"}</DialogTitle>
+        <DialogDescription>ใส่ชื่อ ราคา และต้นทุน จากนั้นกดบันทึกได้เลย</DialogDescription>
+      </DialogHeader>
+      <div className="grid gap-4">
+        <label className="text-sm font-bold">ชื่อสินค้า *<input autoFocus value={product.name} onChange={(event) => setProduct({ ...product, name: event.target.value })} placeholder="เช่น ขนมปังช็อกโกแลต" className={input} /></label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="text-sm font-bold">ราคาขาย *<input inputMode="decimal" type="number" min="0" value={product.price || ""} onChange={(event) => setProduct({ ...product, price: Number(event.target.value) })} className={input} /></label>
+          <label className="text-sm font-bold">ต้นทุน<input inputMode="decimal" type="number" min="0" value={product.cost || ""} onChange={(event) => setProduct({ ...product, cost: Number(event.target.value) })} className={input} /></label>
+        </div>
+        <label className="text-sm font-bold">หมวดหมู่<input value={product.category} onChange={(event) => setProduct({ ...product, category: event.target.value })} placeholder="ขนมปัง" className={input} /></label>
+        {appPricingEnabled && <label className="rounded-2xl bg-cyan-50 p-4 text-sm font-bold text-[#126f7a]">ราคาแอป<input inputMode="decimal" type="number" min="0" value={product.appPrice || ""} onChange={(event) => setProduct({ ...product, appPrice: Number(event.target.value) })} className={input} /></label>}
+        <details className="rounded-2xl border-2 border-slate-100">
+          <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between px-4 font-bold">ข้อมูลเพิ่มเติม <ChevronDown className="size-5" /></summary>
+          <div className="grid gap-4 border-t p-4">
+            <label className="text-sm font-bold">ลิงก์รูปสินค้า<input value={product.imageUrl} onChange={(event) => setProduct({ ...product, imageUrl: event.target.value })} placeholder="https://... (ไม่บังคับ)" className={`${input} text-sm`} /></label>
+            <label className="flex min-h-14 items-center gap-3 rounded-2xl border-2 border-slate-100 px-4"><input type="checkbox" checked={product.trackStock} onChange={(event) => setProduct({ ...product, trackStock: event.target.checked })} className="size-6 accent-[#1697a8]" /><span className="font-bold">นับสต็อกสินค้านี้</span></label>
+            {product.trackStock && <div className="grid grid-cols-2 gap-3"><label className="text-sm font-bold">คงเหลือ<input inputMode="numeric" type="number" min="0" value={product.currentStock} onChange={(event) => setProduct({ ...product, currentStock: Number(event.target.value) })} className={input} /></label><label className="text-sm font-bold">เตือนเมื่อเหลือ<input inputMode="numeric" type="number" min="0" value={product.minStock} onChange={(event) => setProduct({ ...product, minStock: Number(event.target.value) })} className={input} /></label></div>}
+          </div>
+        </details>
+        <Button disabled={saving} onClick={onSave} className="h-16 rounded-2xl bg-[#1697a8] text-lg font-black">{saving ? "กำลังบันทึก..." : "บันทึกสินค้า"}</Button>
+      </div>
+    </DialogContent>
+  </Dialog>;
+}
+
+function EasySettingsView({ data, connected, appPricingEnabled, onAppPricingChange, onRefresh, onAdd, onEdit, onArchive }: { data: QuickBootstrap; connected: boolean; appPricingEnabled: boolean; onAppPricingChange: (enabled: boolean) => void; onRefresh: () => void; onAdd: () => void; onEdit: (product: QuickProduct) => void; onArchive: (product: QuickProduct) => void }) {
+  const [query, setQuery] = useState("");
+  const products = data.products.filter((product) => product.active && product.name.toLocaleLowerCase("th").includes(query.trim().toLocaleLowerCase("th")));
+  return <main className="mx-auto max-w-5xl p-4 pb-40 sm:p-5 sm:pb-40 lg:p-8 lg:pb-40">
+    <div className="flex items-end justify-between gap-4">
+      <div><p className="text-sm text-slate-400">ตั้งค่าร้าน</p><h1 className="text-3xl font-black">จัดการสินค้า</h1></div>
+      <Button onClick={onAdd} className="h-14 rounded-2xl bg-[#1697a8] px-5 font-black"><CirclePlus className="size-5" />เพิ่มสินค้า</Button>
+    </div>
+
+    <section className="mt-5 flex items-center justify-between gap-4 rounded-2xl bg-[#153f46] p-4 text-white">
+      <div className="flex min-w-0 items-center gap-3"><Cloud className="size-6 shrink-0 text-[#55d5df]" /><div className="min-w-0"><p className="font-black">Google Sheet เชื่อมอัตโนมัติ</p><p className="truncate text-xs text-white/60">{connected ? "พร้อมอ่านและบันทึกข้อมูล" : "กำลังใช้ข้อมูลสำรองในเครื่อง"}</p></div></div>
+      <button onClick={onRefresh} className="grid size-12 shrink-0 place-items-center rounded-xl bg-white/10" aria-label="รีเฟรชฐานข้อมูล"><RefreshCw className="size-5" /></button>
+    </section>
+
+    <section className="mt-4 rounded-2xl bg-white p-4 shadow-sm">
+      <label className="flex min-h-14 cursor-pointer items-center justify-between gap-4">
+        <span><b className="block">ใช้ราคาแอป</b><small className="text-slate-400">ปิดไว้เพื่อป้องกันการเลือกผิด เปิดเมื่อต้องขายผ่านแอป</small></span>
+        <input type="checkbox" checked={appPricingEnabled} onChange={(event) => onAppPricingChange(event.target.checked)} className="size-7 shrink-0 accent-[#1697a8]" />
+      </label>
+    </section>
+
+    <section className="mt-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-black">สินค้าที่เปิดขาย ({data.products.filter((product) => product.active).length})</h2><p className="text-sm text-slate-400">แตะดินสอเพื่อแก้ไข หรือถังขยะเพื่อซ่อนจากหน้าขาย</p></div><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="ค้นหาสินค้า" className="h-12 rounded-2xl border-2 border-slate-100 bg-white px-4 outline-none focus:border-[#1697a8] sm:w-64" /></div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {products.map((product) => <article key={product.id} className="flex min-h-24 items-center gap-3 rounded-[22px] bg-white p-3.5 shadow-sm">
+          <div className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-2xl bg-[#e2f4f5] bg-cover bg-center text-2xl" style={product.imageUrl ? { backgroundImage: `url(${product.imageUrl})` } : undefined}>{!product.imageUrl && "🍞"}</div>
+          <div className="min-w-0 flex-1"><p className="truncate font-black">{product.name}</p><p className="text-sm text-slate-500">ขาย {money(product.price)} · ทุน {money(product.cost)}</p>{appPricingEnabled && <p className="text-xs font-bold text-[#168f9f]">ราคาแอป {money(product.appPrice || product.price)}</p>}</div>
+          <button onClick={() => onEdit(product)} className="grid size-12 shrink-0 place-items-center rounded-xl bg-slate-100" aria-label={`แก้ไข ${product.name}`}><Pencil className="size-5" /></button>
+          <button onClick={() => onArchive(product)} className="grid size-12 shrink-0 place-items-center rounded-xl bg-rose-50 text-rose-500" aria-label={`ซ่อน ${product.name}`}><Trash2 className="size-5" /></button>
+        </article>)}
+        {products.length === 0 && <div className="col-span-full rounded-2xl bg-white p-8 text-center font-bold text-slate-400">ไม่พบสินค้า</div>}
+      </div>
+    </section>
+  </main>;
+}
+
 function NavButton({ active, icon: Icon, label, onClick }: { active: boolean; icon: typeof Store; label: string; onClick: () => void }) { return <button onClick={onClick} className={`flex min-w-28 flex-col items-center justify-center gap-1 rounded-full px-5 py-2 font-bold ${active ? "bg-[#def3f5] text-[#117c88]" : "text-slate-400"}`}><Icon className="size-6" /><span className="text-sm">{label}</span></button>; }
